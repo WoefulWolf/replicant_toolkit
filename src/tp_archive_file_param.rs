@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
 use byteorder::ReadBytesExt;
 use eframe::egui;
 
-use crate::traits::{HasUI, IsBXONAsset};
+use crate::traits::{HasTopBarUI, HasUI, IsBXONAsset};
 use crate::util::ReadUtilExt;
 use crate::zstd::ZstdFile;
 
@@ -75,24 +76,11 @@ impl TpArchiveFileParam {
         }
 
         let offset = (file_param.archive_offset as u64) << 4;
-        let total_size = (file_param.compressed_size + file_param.buffer_size) as usize;
 
-        let mut archive_file = std::fs::File::open(archive_path)?;
-        archive_file.seek(std::io::SeekFrom::Start(offset))?;
-        let mut buf = vec![0; total_size];
-        archive_file.read_exact(&mut buf)?;
+        let archive_file = std::fs::File::open(archive_path)?;
+        let archive = Archive::new(archive_file, archive_param.is_streamed)?;
 
-        let out_buf = match file_param.is_compressed {
-            true => {
-                let mut decoder = zstd::stream::Decoder::new(std::io::Cursor::new(buf))?;
-                let mut decompressed_data = Vec::new();
-                decoder.read_to_end(&mut decompressed_data)?;
-                decompressed_data
-            },
-            false => {
-                buf
-            }
-        };
+        let file = archive.get_file(offset, file_param.compressed_size as usize, file_param.uncompressed_size as usize, file_param.buffer_size as usize, file_param.is_compressed)?;
 
         let file_name = file_param.name.clone();
 
@@ -109,10 +97,116 @@ impl TpArchiveFileParam {
 
         let mut output_file = std::fs::File::create(&mut output_path)?;
         
-        output_file.write_all(&out_buf)?;
+        output_file.write_all(&file)?;
         output_file.flush()?;
 
         Ok(())
+    }
+
+    fn extract_all_files(&self) -> Result<(), std::io::Error> {
+        let Some(output_folder) = rfd::FileDialog::new().set_title("Extract all files").pick_folder() else {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Output folder not found."));
+        };
+
+        std::thread::spawn(|| {
+
+        });
+        let mut archives: HashMap<String, Archive> = HashMap::new();
+
+        for file_param in self.file_params.iter() {
+            let archive_param = &self.archive_params[file_param.archive_index as usize];
+            let archive_name = archive_param.name.clone();
+            let mut archives_directory = self.path.clone();
+            archives_directory.pop();
+            let archive_path = archives_directory.join(&archive_name);
+
+            if !archive_path.exists() {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("Archive \"{}\" not found.", &archive_name)));
+            }
+
+            let offset = (file_param.archive_offset as u64) << 4;
+            let total_size = (file_param.uncompressed_size + file_param.buffer_size) as usize;
+
+            let archive = archives.entry(archive_name.clone()).or_insert_with(|| {
+                let archive_file = std::fs::File::open(archive_path).unwrap();
+                let archive = Archive::new(archive_file, archive_param.is_streamed).unwrap();
+                archive
+            });
+
+            let file = archive.get_file(offset, file_param.compressed_size as usize, file_param.uncompressed_size as usize, file_param.buffer_size as usize, file_param.is_compressed)?;
+            let file_name = file_param.name.clone();
+
+            let mut output_path = output_folder.join(&file_name);
+            let output_dir = output_path.parent().ok_or(std::io::Error::new(std::io::ErrorKind::NotFound, "Output folder not found."))?;
+
+            if !output_dir.exists() {
+                std::fs::create_dir_all(output_dir)?;
+            }
+
+            let mut output_file = std::fs::File::create(&mut output_path)?;
+            
+            output_file.write_all(&file)?;
+            output_file.flush()?;
+        }
+
+        Ok(())
+    }
+}
+
+struct Archive {
+    data: Vec<u8>,
+}
+
+impl Archive {
+    fn new<R: Read + Seek>(mut reader: R, streamed: bool) -> Result<Self, std::io::Error> {
+        let data = match streamed {
+            true => {
+                let mut data = Vec::new();
+                reader.read_to_end(&mut data)?;
+                data
+            },
+            false => {
+                reader.seek(std::io::SeekFrom::Start(0))?;
+                let mut header = [0; 64];
+                reader.read_exact(&mut header)?;
+                let Ok(Some(decompressed_size)) = zstd::zstd_safe::get_frame_content_size(&header) else {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid zstd frame header."));
+                };
+                reader.seek(std::io::SeekFrom::Start(0))?;
+
+                let mut decoder = zstd::stream::Decoder::new(reader)?;
+                let mut decompressed_data = vec![0; decompressed_size as usize];
+                decoder.read_exact(&mut decompressed_data)?;
+                decompressed_data
+            }
+        };
+
+        Ok(Self {
+            data
+        })
+    }
+
+    fn get_file(&self, offset: u64, compressed_size: usize, uncompressed_size: usize, buffer_size: usize, compressed: bool) -> Result<Vec<u8>, std::io::Error> {
+        match compressed {
+            true => {
+                let mut reader = std::io::Cursor::new(&self.data);
+                let mut buf = vec![0; compressed_size];
+                reader.seek(std::io::SeekFrom::Start(offset))?;
+                reader.read_exact(&mut buf)?;
+
+                let mut decoder = zstd::stream::Decoder::new(std::io::Cursor::new(buf))?;
+                let mut decompressed_data = vec![0; uncompressed_size + buffer_size];
+                decoder.read_exact(&mut decompressed_data)?;
+                Ok(decompressed_data)
+            },
+            false => {
+                let mut reader = std::io::Cursor::new(&self.data);
+                let mut buf = vec![0; uncompressed_size + buffer_size];
+                reader.seek(std::io::SeekFrom::Start(offset))?;
+                reader.read_exact(&mut buf)?;
+                Ok(buf)
+            }
+        }
     }
 }
 
@@ -134,7 +228,7 @@ impl ArchiveParam {
 
         let (offset_name, rel_offset_name) = reader.read_offsets::<byteorder::LittleEndian>()?;
         let flags = reader.read_u32::<byteorder::LittleEndian>()?;
-        let is_streamed = reader.read_u8()? == 1;
+        let is_streamed = reader.read_u8()? != 0;
 
         let return_pos = reader.stream_position()?;
         reader.seek(std::io::SeekFrom::Start(offset_name))?;
@@ -248,22 +342,22 @@ impl HasUI for TpArchiveFileParam {
                     });
                     
                     ui.separator();
-
-                    ui.horizontal(|ui| {
-                        ui.label("Filter:");
-                        if ui.text_edit_singleline(&mut self.file_params_filter).lost_focus() {
-                            if self.file_params_filter.is_empty() {
-                                self.filtered_file_params = self.file_params.clone();
-                            } else {
-                                self.filtered_file_params = self.file_params.iter().filter(|file_param| {
-                                    let archive_param = &self.archive_params[file_param.archive_index as usize];
-                                    file_param.name.contains(&self.file_params_filter) || archive_param.name.contains(&self.file_params_filter)
-                                }).cloned().collect();
-                            }
-                        }
-                    });
                     
                     ui.collapsing(format!("{} Files", egui_phosphor::regular::FILES), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Filter:");
+                            if ui.text_edit_singleline(&mut self.file_params_filter).lost_focus() {
+                                if self.file_params_filter.is_empty() {
+                                    self.filtered_file_params = self.file_params.clone();
+                                } else {
+                                    self.filtered_file_params = self.file_params.iter().filter(|file_param| {
+                                        let archive_param = &self.archive_params[file_param.archive_index as usize];
+                                        file_param.name.contains(&self.file_params_filter) || archive_param.name.contains(&self.file_params_filter)
+                                    }).cloned().collect();
+                                }
+                            }
+                        });
+
                         egui_extras::TableBuilder::new(ui)
                         .id_salt("file_params")
                         .striped(true)
@@ -347,6 +441,24 @@ impl HasUI for TpArchiveFileParam {
                     });
                 });
             });
+    }
+}
+
+impl HasTopBarUI for TpArchiveFileParam {
+    fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
+        ui.menu_button(format!("{} Extract", egui_phosphor::regular::FOLDER_OPEN), |ui| {
+            if ui.button("All files…").clicked() {
+                match self.extract_all_files() {
+                    Ok(_) => {
+                        toasts.success(format!("All files extracted successfully.")).duration(Some(std::time::Duration::from_secs(10))).closable(true);
+                    },
+                    Err(e) => {
+                        toasts.error(format!("Failed to extract all files: {}", e)).duration(Some(std::time::Duration::from_secs(10))).closable(true);
+                    }
+                }
+                ui.close_menu();
+            }
+        });
     }
 }
 

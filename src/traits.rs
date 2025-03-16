@@ -7,8 +7,12 @@ pub trait HasUI {
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts);
 }
 
-pub trait SystemFile: HasSystemPath + HasUI {}
+pub trait HasTopBarUI {
+    fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts);
+}
 
-pub trait ReplicantFile: HasUI {}
+pub trait SystemFile: HasSystemPath + HasUI + HasTopBarUI {}
 
-pub trait IsBXONAsset: HasUI {}
+pub trait ReplicantFile: HasUI + HasTopBarUI {}
+
+pub trait IsBXONAsset: HasUI + HasTopBarUI {}

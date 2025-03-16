@@ -29,4 +29,10 @@ impl HasUI for GenericFile {
     }
 }
 
+impl HasTopBarUI for GenericFile {
+    fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
+        
+    }
+}
+
 impl SystemFile for GenericFile {}

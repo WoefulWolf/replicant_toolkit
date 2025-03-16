@@ -37,7 +37,7 @@ impl ReplicantToolkit {
 
         match &file_magic {
             [0x28, 0xB5, 0x2F, 0xFD] => {
-                let zstd_file = match zstd::ZstdFile::new(path, file_stream) {
+                let zstd_file = match zstd::ZstdFile::new(path.clone(), file_stream) {
                     Ok(zstd_file) => zstd_file,
                     Err(e) => {
                         self.toasts.error(format!("Failed to open file: {}", e)).duration(Some(std::time::Duration::from_secs(10))).closable(true);
@@ -47,12 +47,15 @@ impl ReplicantToolkit {
                 self.open_files.push(Box::new(zstd_file));
             },
             _ => {
-                let generic_file = Box::new(generic_file::GenericFile::new(path));
+                let generic_file = Box::new(generic_file::GenericFile::new(path.clone()));
                 self.open_files.push(generic_file);
             }
         };
         
         self.open_files.sort_by(|a, b| a.path().cmp(b.path()));
+        // Find the index of the newly opened file
+        let index = self.open_files.iter().position(|file| file.path() == &path).unwrap();
+        self.selected_file_index = Some(index);
     }
 
     fn close_file(&mut self, index: usize) {
@@ -130,6 +133,10 @@ impl eframe::App for ReplicantToolkit {
                             ui.close_menu();
                         }
                     });
+
+                    if let Some(index) = self.selected_file_index {
+                        self.open_files[index].paint_top_bar(ui, &mut self.toasts);
+                    }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         egui::widgets::global_theme_preference_switch(ui);

@@ -4,7 +4,7 @@ use byteorder::ReadBytesExt;
 use eframe::egui;
 
 use crate::tp_archive_file_param::TpArchiveFileParam;
-use crate::traits::{HasUI, IsBXONAsset, ReplicantFile};
+use crate::traits::{HasTopBarUI, HasUI, IsBXONAsset, ReplicantFile};
 use crate::util::ReadUtilExt;
 
 pub struct BXON {
@@ -67,11 +67,19 @@ impl HasUI for BXON {
         .collapsible(true)
         .movable(true)
         .show(ui.ctx(), |ui| {
-            ui.label(format!("Version: {}", self.version));
-            ui.label(format!("Project Id: {}", self.project_id));
-            ui.separator();
-            self.asset.paint(ui, toasts);
+            egui::ScrollArea::both().show(ui, |ui| {
+                ui.label(format!("Version: {}", self.version));
+                ui.label(format!("Project Id: {}", self.project_id));
+                ui.separator();
+                self.asset.paint(ui, toasts);
+            });
         });
+    }
+}
+
+impl HasTopBarUI for BXON {
+    fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
+        self.asset.paint_top_bar(ui, toasts);
     }
 }
 
