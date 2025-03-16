@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl, x86_64-apple-darwin]
+        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl]
     steps:
       - uses: actions/checkout@master
       - name: Compile ${{ matrix.target }}
@@ -20,12 +20,12 @@ jobs:
         uses: rust-build/rust-build.action@v1.4.5
         with:
           RUSTTARGET: ${{ matrix.target }}
-          TOOLCHAIN_VERSION: 1.85.0
+          TOOLCHAIN_VERSION: stable
           UPLOAD_MODE: none
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Binary
+          name: ${{ matrix.target }} binary
           path: |
             ${{ steps.compile.outputs.BUILT_ARCHIVE }}
             ${{ steps.compile.outputs.BUILT_CHECKSUM }}
