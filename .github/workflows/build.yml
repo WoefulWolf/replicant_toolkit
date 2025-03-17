@@ -24,7 +24,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get install jq
+          sudo apt-get update
+          sudo apt-get install -y jq mingw-w64 musl-tools
       
       - name: Install target ${{ matrix.target }}
         run: rustup target add ${{ matrix.target }}
@@ -33,11 +34,19 @@ jobs:
         run: |
           BINARY_NAME=$(cargo metadata --format-version 1 | jq -r '.packages[0].name')
           echo "BINARY=${BINARY_NAME}" >> $GITHUB_ENV
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         
       - name: Compile ${{ matrix.target }}
         id: compile
         run: cargo build --profile ${{ matrix.profile }} --target ${{ matrix.target }}
-        continue-on-error: true
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
