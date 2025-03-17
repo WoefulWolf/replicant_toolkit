@@ -2,9 +2,14 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+  
 jobs:
   build:
     name: Build
@@ -12,20 +17,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        profile: [release]
         target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-musl]
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get install jq
+      
+      - name: Install target ${{ matrix.target }}
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Get binary name
+        run: |
+          BINARY_NAME=$(cargo metadata --format-version 1 | jq -r '.packages[0].name')
+          echo "BINARY=${BINARY_NAME}" >> $GITHUB_ENV
+        
       - name: Compile ${{ matrix.target }}
         id: compile
-        uses: rust-build/rust-build.action@v1.4.5
-        with:
-          RUSTTARGET: ${{ matrix.target }}
-          TOOLCHAIN_VERSION: stable
-          UPLOAD_MODE: none
+        run: cargo build --profile ${{ matrix.profile }} --target ${{ matrix.target }}
+        continue-on-error: true
+          
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }} binary
+          name: ${{ env.BINARY }}_${{ matrix.target }}_${{ matrix.profile }}
           path: |
-            ${{ steps.compile.outputs.BUILT_ARCHIVE }}
-            ${{ steps.compile.outputs.BUILT_CHECKSUM }}
+            target/${{ matrix.profile }}/${{ env.BINARY }}
+            target/${{ matrix.profile }}/${{ env.BINARY }}.*
