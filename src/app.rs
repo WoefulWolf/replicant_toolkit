@@ -8,8 +8,10 @@ pub struct ReplicantToolkit {
     toasts: egui_notify::Toasts,
     show_open_files: bool,
     open_files: Vec<Box<dyn SystemFile>>,
-    selected_file_index: Option<usize>,
+    selected_file_indices: Vec<usize>,
     files_to_close: Vec<usize>,
+
+    top_layer_id: Option<egui::LayerId>,
 }
 
 impl Default for ReplicantToolkit {
@@ -18,8 +20,9 @@ impl Default for ReplicantToolkit {
             toasts: egui_notify::Toasts::default(),
             show_open_files: true,
             open_files: Vec::new(),
-            selected_file_index: None,
+            selected_file_indices: Vec::new(),
             files_to_close: Vec::new(),
+            top_layer_id: None,
         }
     }
 }
@@ -65,16 +68,11 @@ impl ReplicantToolkit {
         self.open_files.sort_by(|a, b| a.path().cmp(b.path()));
         // Find the index of the newly opened file
         let index = self.open_files.iter().position(|file| file.path() == &path).unwrap();
-        self.selected_file_index = Some(index);
+        self.selected_file_indices = vec![index];
     }
 
     fn close_file(&mut self, index: usize) {
-        if self.selected_file_index == Some(index) {
-            self.selected_file_index = None;
-        }
-        if Some(index) < self.selected_file_index {
-            self.selected_file_index = Some(self.selected_file_index.unwrap() - 1);
-        }
+        self.selected_file_indices.retain(|i| *i != index);
 
         self.files_to_close.push(index);
     }
@@ -96,7 +94,7 @@ impl ReplicantToolkit {
     }
 
     fn close_all_files(&mut self) {
-        self.selected_file_index = None;
+        self.selected_file_indices.clear();
         self.files_to_close = self.open_files.iter().enumerate().map(|(i, _)| i).collect();
     }
 
@@ -107,8 +105,28 @@ impl ReplicantToolkit {
 
         self.files_to_close.sort_by(|a, b| a.cmp(b));
         while let Some(index) = self.files_to_close.pop() {
+            self.selected_file_indices.retain(|i| *i != index);
             self.open_files.remove(index);
+            // Decrease the indices of all selected files after the removed file
+            for i in self.selected_file_indices.iter_mut() {
+                if *i > index {
+                    *i -= 1;
+                }
+            }
         }
+    }
+
+    fn get_index_of_top_layer_id(&self) -> Option<usize> {
+        let mut index = 0;
+        if let Some(top_layer_id) = self.top_layer_id {
+            for file in self.open_files.iter() {
+                if egui::Id::new(file.path()) == top_layer_id.id {
+                    return Some(index);
+                }
+                index += 1;
+            }
+        }
+        None
     }
 }
 
@@ -116,6 +134,7 @@ impl eframe::App for ReplicantToolkit {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         self.close_queued_files();
         self.toasts.show(ctx);
+
         egui::TopBottomPanel::top("top_bar")
             // .frame(egui::Frame::default().inner_margin(4))
             .show(ctx, |ui| {
@@ -144,7 +163,7 @@ impl eframe::App for ReplicantToolkit {
                         }
                     });
 
-                    if let Some(index) = self.selected_file_index {
+                    if let Some(index) = self.get_index_of_top_layer_id() {
                         self.open_files[index].paint_top_bar(ui, &mut self.toasts);
                     }
 
@@ -174,7 +193,7 @@ impl eframe::App for ReplicantToolkit {
                             });
                         } else {
                             for i in 0..self.open_files.len() {
-                                let selected = self.selected_file_index == Some(i);
+                                let selected = self.selected_file_indices.contains(&i);
                                 let background_color = if selected {
                                     ui.visuals().selection.bg_fill
                                 } else {
@@ -202,7 +221,15 @@ impl eframe::App for ReplicantToolkit {
                                         }).response;
 
                                         if response.clicked() {
-                                            self.selected_file_index = Some(i);
+                                            if ctx.input(|i| i.modifiers.shift) {
+                                                if self.selected_file_indices.contains(&i) {
+                                                    self.selected_file_indices.retain(|index| *index != i);
+                                                } else { 
+                                                    self.selected_file_indices.push(i);
+                                                }
+                                            } else {
+                                                self.selected_file_indices = vec![i];
+                                            }
                                         }
                                     });
                             }
@@ -212,7 +239,7 @@ impl eframe::App for ReplicantToolkit {
 
         egui::TopBottomPanel::bottom("bottom_bar")
             .show(ctx, |ui| {
-                if let Some(index) = self.selected_file_index {
+                if let Some(index) = self.get_index_of_top_layer_id() {
                     ui.label(self.open_files[index].path().to_str().unwrap_or("Unknown"));
                 }
             });
@@ -220,17 +247,26 @@ impl eframe::App for ReplicantToolkit {
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(&ctx.style()).fill(ctx.style().visuals.window_fill.gamma_multiply(0.8)).inner_margin(0))
             .show(ctx, |ui| {
-                if let Some(index) = self.selected_file_index {
-                    egui::Window::new(self.open_files[index].window_title())
-                    .constrain_to(ui.available_rect_before_wrap())
-                    .resizable([true, true])
-                    .collapsible(true)
-                    .movable(true)
-                    .show(ui.ctx(), |ui| {
-                        egui::ScrollArea::both().show(ui, |ui| {
-                            self.open_files[index].paint(ui, &mut self.toasts);
+                self.top_layer_id = ui.ctx().top_layer_id();
+
+                if !self.selected_file_indices.is_empty() {
+                    for index in self.selected_file_indices.iter() {
+                        egui::Window::new(self.open_files[*index].window_title())
+                        .id(egui::Id::new(self.open_files[*index].path()))
+                        .constrain_to(ui.available_rect_before_wrap())
+                        .resizable([true, true])
+                        .collapsible(true)
+                        .movable(true)
+                        .show(ui.ctx(), |ui| {
+                            ui.vertical_centered(|ui| {
+                                ui.add(egui::Label::new(egui::RichText::new(self.open_files[*index].path().to_str().unwrap_or("Unknown")).small_raised()).extend());
+                            });
+                            ui.add_space(6.0);
+                            egui::ScrollArea::both().show(ui, |ui| {
+                                self.open_files[*index].paint(ui, &mut self.toasts);
+                            });
                         });
-                    });
+                    }
                 } else if !self.open_files.is_empty() {
                     ui.centered_and_justified(|ui| {
                         ui.label("Select a file to start!");

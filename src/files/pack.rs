@@ -118,32 +118,36 @@ impl HasUI for PACK {
         ui.separator();
 
         ui.collapsing(egui::RichText::new(format!("{} Imports", egui_phosphor::regular::ARROW_SQUARE_IN)).heading(), |ui| {
-            egui_extras::TableBuilder::new(ui)
-            .id_salt("pack_imports")
-            .striped(true)
-            .resizable(true)
-            .columns(egui_extras::Column::auto(), 2)
-            .header(16.0, |mut header| {
-                header.col(|ui| {
-                    ui.heading("Path");
-                });
-                header.col(|ui| {
-                    ui.heading("Hash");
-                });
-            })
-            .body(|mut body| {
-                for import in self.imports.iter() {
-                    body.row(16.0, |mut row| {
-                        row.col(|ui| {
-                            ui.add(egui::Label::new(format!("{}", import.path)).extend());
-                        });
-                        row.col(|ui| {
-                            ui.style_mut().override_font_id = Some(egui::FontId::monospace(12.0));
-                            ui.add(egui::Label::new(format!("{:08X}", import.hash)).extend());
-                        });
+            if self.imports.is_empty() {
+                ui.label("No imports found.");
+            } else {
+                egui_extras::TableBuilder::new(ui)
+                .id_salt("pack_imports")
+                .striped(true)
+                .resizable(true)
+                .columns(egui_extras::Column::auto(), 2)
+                .header(16.0, |mut header| {
+                    header.col(|ui| {
+                        ui.heading("Path");
                     });
-                }
-            });
+                    header.col(|ui| {
+                        ui.heading("Hash");
+                    });
+                })
+                .body(|mut body| {
+                    for import in self.imports.iter() {
+                        body.row(16.0, |mut row| {
+                            row.col(|ui| {
+                                ui.add(egui::Label::new(format!("{}", import.path)).extend());
+                            });
+                            row.col(|ui| {
+                                ui.style_mut().override_font_id = Some(egui::FontId::monospace(12.0));
+                                ui.add(egui::Label::new(format!("{:08X}", import.hash)).extend());
+                            });
+                        });
+                    }
+                });
+            }
         });
 
         ui.separator();
