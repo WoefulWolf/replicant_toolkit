@@ -32,7 +32,8 @@ jobs:
 
       - name: Get binary name
         run: |
-          BINARY_NAME=$(cargo metadata --format-version 1 | jq -r '.packages[0].name')
+          BINARY_NAME=$(cargo read-manifest | jq -r '.name')
+          echo "Detected binary name: $BINARY_NAME"
           echo "BINARY=${BINARY_NAME}" >> $GITHUB_ENV
 
       - name: Cache Cargo dependencies
@@ -53,5 +54,5 @@ jobs:
         with:
           name: ${{ env.BINARY }}_${{ matrix.target }}_${{ matrix.profile }}
           path: |
-            target/${{ matrix.profile }}/${{ env.BINARY }}
-            target/${{ matrix.profile }}/${{ env.BINARY }}.*
+            target/${{ matrix.target }}/${{ matrix.profile }}/${{ env.BINARY }}
+            target/${{ matrix.target }}/${{ matrix.profile }}/${{ env.BINARY }}.*
