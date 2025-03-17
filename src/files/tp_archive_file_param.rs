@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use byteorder::ReadBytesExt;
 use eframe::egui;
 
-use crate::traits::{HasTopBarUI, HasUI, IsBXONAsset};
+use crate::traits::{HasTopBarUI, HasUI, HasWindowTitle, IsBXONAsset};
 use crate::util::ReadUtilExt;
-use crate::zstd::ZstdFile;
+use crate::files::zstd::ZstdFile;
 
 pub struct TpArchiveFileParam {
     path: PathBuf,
@@ -299,15 +299,15 @@ impl FileParam {
 impl HasUI for TpArchiveFileParam {
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         egui::Frame::window(&ui.style()).show(ui, |ui| {
-            egui::CollapsingHeader::new("tpArchiveFileParam")
+            egui::CollapsingHeader::new(egui::RichText::new(format!("{} tpArchiveFileParam", egui_phosphor::regular::DATABASE)).heading())
                 .default_open(true)
                 .show(ui, |ui| {
                     ui.label(format!("Archive Count: {}", self.archive_count));
-                    ui.label(format!("Offset Archives: {}", self.offset_archives));
                     ui.label(format!("File Count: {}", self.file_count));
-                    ui.label(format!("Offset Files: {}", self.offset_files));
 
-                    ui.collapsing(format!("{} Archives", egui_phosphor::regular::ARCHIVE), |ui| {
+                    ui.separator();
+
+                    ui.collapsing(egui::RichText::new(format!("{} Archives", egui_phosphor::regular::ARCHIVE)).heading(), |ui| {
                         egui_extras::TableBuilder::new(ui)
                         .id_salt("archive_params")
                         .striped(true)
@@ -343,7 +343,7 @@ impl HasUI for TpArchiveFileParam {
                     
                     ui.separator();
                     
-                    ui.collapsing(format!("{} Files", egui_phosphor::regular::FILES), |ui| {
+                    ui.collapsing(egui::RichText::new(format!("{} Files", egui_phosphor::regular::FILES)).heading(), |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Filter:");
                             if ui.text_edit_singleline(&mut self.file_params_filter).lost_focus() {

@@ -1,8 +1,9 @@
 use std::{io::{Read, Seek}, path::PathBuf};
 
 use byteorder::ReadBytesExt;
+use eframe::egui;
 
-use crate::{bxon::BXON, traits::{HasSystemPath, HasTopBarUI, HasUI, ReplicantFile, SystemFile}};
+use crate::{files::bxon::BXON, traits::{HasSystemPath, HasTopBarUI, HasUI, HasWindowTitle, ReplicantFile, SystemFile}};
 
 pub struct ZstdFile {
     path: PathBuf,
@@ -50,6 +51,12 @@ impl HasTopBarUI for ZstdFile {
 impl HasSystemPath for ZstdFile {
     fn path(&self) -> &PathBuf {
         &self.path
+    }
+}
+
+impl HasWindowTitle for ZstdFile {
+    fn window_title(&self) -> String {
+        format!("{} ({} zstd)", self.decompressed_file.window_title(), egui_phosphor::regular::FILE_ARCHIVE)
     }
 }
 

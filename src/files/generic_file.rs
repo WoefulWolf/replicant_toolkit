@@ -35,4 +35,10 @@ impl HasTopBarUI for GenericFile {
     }
 }
 
+impl HasWindowTitle for GenericFile {
+    fn window_title(&self) -> String {
+        format!("{} Unknown", egui_phosphor::regular::FILE)
+    }
+}
+
 impl SystemFile for GenericFile {}

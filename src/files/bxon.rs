@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use byteorder::ReadBytesExt;
 use eframe::egui;
 
-use crate::tp_archive_file_param::TpArchiveFileParam;
-use crate::traits::{HasTopBarUI, HasUI, IsBXONAsset, ReplicantFile};
+use crate::files::tp_archive_file_param::TpArchiveFileParam;
+use crate::traits::{HasTopBarUI, HasUI, HasWindowTitle, IsBXONAsset, ReplicantFile};
 use crate::util::ReadUtilExt;
 
 pub struct BXON {
@@ -61,25 +61,22 @@ impl BXON {
 
 impl HasUI for BXON {
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
-        egui::Window::new(format!("{} BXON", egui_phosphor::regular::CUBE))
-        .constrain_to(ui.available_rect_before_wrap())
-        .resizable([true, true])
-        .collapsible(true)
-        .movable(true)
-        .show(ui.ctx(), |ui| {
-            egui::ScrollArea::both().show(ui, |ui| {
-                ui.label(format!("Version: {}", self.version));
-                ui.label(format!("Project Id: {}", self.project_id));
-                ui.separator();
-                self.asset.paint(ui, toasts);
-            });
-        });
+        ui.label(format!("Version: {}", self.version));
+        ui.label(format!("Project Id: {}", self.project_id));
+        ui.separator();
+        self.asset.paint(ui, toasts);
     }
 }
 
 impl HasTopBarUI for BXON {
     fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         self.asset.paint_top_bar(ui, toasts);
+    }
+}
+
+impl HasWindowTitle for BXON {
+    fn window_title(&self) -> String {
+        format!("{} BXON", egui_phosphor::regular::CUBE)
     }
 }
 
