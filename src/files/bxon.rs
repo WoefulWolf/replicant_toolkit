@@ -72,7 +72,6 @@ impl HasUI for BXON {
         ui.label(format!("Project Id: {}", self.project_id));
         ui.separator();
         self.asset.paint(ui, toasts);
-        ui.separator();
         self.asset.resource_preview(ui, toasts);
     }
 

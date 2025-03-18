@@ -252,17 +252,15 @@ impl eframe::App for ReplicantToolkit {
 
                 if !self.selected_file_indices.is_empty() {
                     for index in self.selected_file_indices.iter() {
-                        egui::Window::new(self.open_files[*index].title())
+                        let filename = self.open_files[*index].path().file_name().unwrap_or_default().to_str().unwrap_or("Unknown");
+
+                        egui::Window::new(format!("{} - {}", self.open_files[*index].title(), filename))
                         .id(egui::Id::new(self.open_files[*index].path()))
                         .constrain_to(ui.available_rect_before_wrap())
                         .resizable([true, true])
                         .collapsible(true)
                         .movable(true)
                         .show(ui.ctx(), |ui| {
-                            ui.vertical_centered(|ui| {
-                                ui.add(egui::Label::new(egui::RichText::new(self.open_files[*index].path().to_str().unwrap_or("Unknown")).small_raised()).extend());
-                            });
-                            ui.add_space(6.0);
                             egui::ScrollArea::both().show(ui, |ui| {
                                 self.open_files[*index].paint(ui, &mut self.toasts);
                             });
