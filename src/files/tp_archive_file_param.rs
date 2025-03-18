@@ -4,9 +4,8 @@ use std::path::PathBuf;
 use byteorder::ReadBytesExt;
 use eframe::egui;
 
-use crate::traits::{HasTopBarUI, HasUI, HasWindowTitle, IsBXONAsset};
+use crate::traits::{HasResource, HasUI, IsBXONAsset};
 use crate::util::ReadUtilExt;
-use crate::files::zstd::ZstdFile;
 
 pub struct TpArchiveFileParam {
     path: PathBuf,
@@ -398,7 +397,7 @@ impl HasUI for TpArchiveFileParam {
                                 ui.heading("Extract");
                             });
                         })
-                        .body(|mut body| {
+                        .body(|body| {
                             body.rows(16.0, self.filtered_file_params.len(), |mut row| {
                                 let file_param = &self.filtered_file_params[row.index()];
                                 let archive_param = &self.archive_params[file_param.archive_index as usize];
@@ -442,9 +441,7 @@ impl HasUI for TpArchiveFileParam {
                 });
             });
     }
-}
 
-impl HasTopBarUI for TpArchiveFileParam {
     fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         ui.menu_button(format!("{} Extract", egui_phosphor::regular::FOLDER_OPEN), |ui| {
             if ui.button("All files…").clicked() {
@@ -462,5 +459,6 @@ impl HasTopBarUI for TpArchiveFileParam {
     }
 }
 
-impl IsBXONAsset for TpArchiveFileParam {
-}
+impl HasResource for TpArchiveFileParam {}
+
+impl IsBXONAsset for TpArchiveFileParam {}

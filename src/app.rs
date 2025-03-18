@@ -134,6 +134,7 @@ impl eframe::App for ReplicantToolkit {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         self.close_queued_files();
         self.toasts.show(ctx);
+        egui_extras::install_image_loaders(ctx);
 
         egui::TopBottomPanel::top("top_bar")
             // .frame(egui::Frame::default().inner_margin(4))
@@ -251,7 +252,7 @@ impl eframe::App for ReplicantToolkit {
 
                 if !self.selected_file_indices.is_empty() {
                     for index in self.selected_file_indices.iter() {
-                        egui::Window::new(self.open_files[*index].window_title())
+                        egui::Window::new(self.open_files[*index].title())
                         .id(egui::Id::new(self.open_files[*index].path()))
                         .constrain_to(ui.available_rect_before_wrap())
                         .resizable([true, true])

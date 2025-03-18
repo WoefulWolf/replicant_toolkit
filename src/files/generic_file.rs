@@ -27,18 +27,11 @@ impl HasUI for GenericFile {
             ui.label(egui::RichText::new(egui_phosphor::regular::SEAL_QUESTION).size(128.0));
         });
     }
-}
 
-impl HasTopBarUI for GenericFile {
-    fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
-        
-    }
-}
-
-impl HasWindowTitle for GenericFile {
-    fn window_title(&self) -> String {
+    fn title(&self) -> String {
         format!("{} Unknown", egui_phosphor::regular::FILE)
     }
 }
+    
 
 impl SystemFile for GenericFile {}
