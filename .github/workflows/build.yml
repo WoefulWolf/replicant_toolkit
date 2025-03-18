@@ -20,7 +20,7 @@ jobs:
       - uses: Cyberboss/install-winget@v1
       - name: Install dependencies
         run: |
-          winget install jqlang.jq --silent
+          winget install jqlang.jq --silent --accept-package-agreements --accept-source-agreements
         shell: pwsh
 
       - name: Get binary name
