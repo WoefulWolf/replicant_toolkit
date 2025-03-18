@@ -16,19 +16,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - uses: Cyberboss/install-winget@v1
-      - name: Install dependencies
-        run: |
-          winget install jqlang.jq --silent --accept-package-agreements --accept-source-agreements
-        shell: pwsh
-
-      - name: Get binary name
-        run: |
-          $BINARY_NAME = cargo read-manifest | jq -r '.name'
-          Write-Host "Detected binary name: $BINARY_NAME"
-          echo "BINARY=$BINARY_NAME" >> $env:GITHUB_ENV
-        shell: pwsh
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -46,7 +33,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.BINARY }}_${{ matrix.target }}_${{ matrix.profile }}
+          name: replicant_toolkit-release
           path: |
-            target/${{ matrix.profile }}/${{ env.BINARY }}
-            target/${{ matrix.profile }}/${{ env.BINARY }}.*
+            target/release/replicant_toolkit
+            target/release/replicant_toolkit.*
