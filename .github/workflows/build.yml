@@ -12,26 +12,22 @@ env:
   
 jobs:
   build:
-    name: Build
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        profile: [release]
-        target: [x86_64-pc-windows-gnu, x86_64-unknown-linux-gnu]
+    name: Build windows-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-docker-action@v4
       
       - name: Install dependencies
         run: |
-          cargo install cross --git https://github.com/cross-rs/cross
+          winget install jqlang.jq
+        shell: pwsh
 
       - name: Get binary name
         run: |
-          BINARY_NAME=$(cargo read-manifest | jq -r '.name')
-          echo "Detected binary name: $BINARY_NAME"
-          echo "BINARY=${BINARY_NAME}" >> $GITHUB_ENV
+          $BINARY_NAME = cargo read-manifest | jq -r '.name'
+          Write-Host "Detected binary name: $BINARY_NAME"
+          echo "BINARY=$BINARY_NAME" >> $env:GITHUB_ENV
+        shell: pwsh
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -44,12 +40,12 @@ jobs:
         
       - name: Compile ${{ matrix.target }}
         id: compile
-        run: cross build --profile ${{ matrix.profile }} --target ${{ matrix.target }}
+        run: cargo build --profile release
           
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BINARY }}_${{ matrix.target }}_${{ matrix.profile }}
           path: |
-            target/${{ matrix.target }}/${{ matrix.profile }}/${{ env.BINARY }}
-            target/${{ matrix.target }}/${{ matrix.profile }}/${{ env.BINARY }}.*
+            target/${{ matrix.profile }}/${{ env.BINARY }}
+            target/${{ matrix.profile }}/${{ env.BINARY }}.*
