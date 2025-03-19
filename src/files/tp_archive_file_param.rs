@@ -105,9 +105,6 @@ impl TpArchiveFileParam {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Output folder not found."));
         };
 
-        std::thread::spawn(|| {
-
-        });
         let mut archives: HashMap<String, Archive> = HashMap::new();
 
         for file_param in self.file_params.iter() {
@@ -130,8 +127,9 @@ impl TpArchiveFileParam {
                 archive
             });
 
-            let file = archive.get_file(offset, file_param.compressed_size as usize, file_param.uncompressed_size as usize, file_param.buffer_size as usize, file_param.is_compressed)?;
             let file_name = file_param.name.clone();
+            println!("Extracting {}...", file_name);
+            let file = archive.get_file(offset, file_param.compressed_size as usize, file_param.uncompressed_size as usize, file_param.buffer_size as usize, file_param.is_compressed)?;
 
             let mut output_path = output_folder.join(&file_name);
             let output_dir = output_path.parent().ok_or(std::io::Error::new(std::io::ErrorKind::NotFound, "Output folder not found."))?;
@@ -145,6 +143,8 @@ impl TpArchiveFileParam {
             output_file.write_all(&file)?;
             output_file.flush()?;
         }
+
+        println!("All files extracted successfully.");
 
         Ok(())
     }

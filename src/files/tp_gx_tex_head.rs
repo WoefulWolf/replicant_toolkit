@@ -1,7 +1,6 @@
 use std::{borrow::Cow, io::Write, path::PathBuf};
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use eframe::egui;
-use image::ImageBuffer;
 
 use crate::traits::*;
 use crate::util::ReadUtilExt;
@@ -393,7 +392,7 @@ impl HasResource for TpGxTexHead {
 impl HasUI for TpGxTexHead {
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         egui::Frame::window(&ui.style()).show(ui, |ui| {
-            egui::CollapsingHeader::new(egui::RichText::new(format!("{} tpGxTexHead", egui_phosphor::regular::IMAGE)).heading())
+            egui::CollapsingHeader::new(egui::RichText::new(self.title()).heading())
                 .default_open(false)
                 .show(ui, |ui| {
                     ui.label(format!("Width: {}", self.width));
@@ -401,11 +400,14 @@ impl HasUI for TpGxTexHead {
                     ui.label(format!("Depth: {}", self.depth));
                     ui.label(format!("Size: {}", self.size));
                     ui.label(format!("Format: {:X}", self.format.to_u32()));
-                    ui.label(format!("Mip Count: {}", self.surface_count));
-
-                    ui.label(format!("Resource: {:?}", &self.resource[0..4]));
+                    ui.label(format!("Mip Count: {}", self.mip_count));
+                    ui.label(format!("Surface Count: {}", self.surface_count));
                 });
             });
+    }
+
+    fn title(&self) -> String {
+        format!("{} tpGxTexHead", egui_phosphor::regular::IMAGE)
     }
 }
 
