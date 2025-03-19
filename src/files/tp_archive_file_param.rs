@@ -20,7 +20,6 @@ pub struct TpArchiveFileParam {
     archive_params: Vec<ArchiveParam>,
     file_params: Vec<FileParam>,
     file_params_filter: String,
-    filtered_file_params: Vec<FileParam>,
 }
 
 impl TpArchiveFileParam {
@@ -54,8 +53,7 @@ impl TpArchiveFileParam {
 
             archive_params,
             file_params: file_params.clone(),
-            file_params_filter: String::new(),
-            filtered_file_params: file_params,
+            file_params_filter: String::new()
         })
     }
 
@@ -345,16 +343,7 @@ impl HasUI for TpArchiveFileParam {
                     ui.collapsing(egui::RichText::new(format!("{} Files", egui_phosphor::regular::FILES)).heading(), |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Filter:");
-                            if ui.text_edit_singleline(&mut self.file_params_filter).lost_focus() {
-                                if self.file_params_filter.is_empty() {
-                                    self.filtered_file_params = self.file_params.clone();
-                                } else {
-                                    self.filtered_file_params = self.file_params.iter().filter(|file_param| {
-                                        let archive_param = &self.archive_params[file_param.archive_index as usize];
-                                        file_param.name.contains(&self.file_params_filter) || archive_param.name.contains(&self.file_params_filter)
-                                    }).cloned().collect();
-                                }
-                            }
+                            ui.text_edit_singleline(&mut self.file_params_filter);
                         });
 
                         egui_extras::TableBuilder::new(ui)
@@ -364,42 +353,50 @@ impl HasUI for TpArchiveFileParam {
                         .columns(egui_extras::Column::auto(), 7)
                         .header(16.0, |mut header: egui_extras::TableRow<'_, '_>| {
                             header.col(|ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 if ui.heading("Archive").clicked() {
-                                    self.filtered_file_params.sort_by(|a, b| a.archive_index.cmp(&b.archive_index));
+                                    self.file_params.sort_by(|a, b| a.archive_index.cmp(&b.archive_index));
                                 }
                             });
                             header.col(|ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 if ui.heading("Path").clicked() {
-                                    self.filtered_file_params.sort_by(|a, b| a.name.cmp(&b.name));
+                                    self.file_params.sort_by(|a, b| a.name.cmp(&b.name));
                                 }
                             });
                             header.col(|ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 if ui.heading("Hash").clicked() {
-                                    self.filtered_file_params.sort_by(|a, b| a.hash.cmp(&b.hash));
+                                    self.file_params.sort_by(|a, b| a.hash.cmp(&b.hash));
                                 }
                             });
                             header.col(|ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 if ui.heading("Compressed Size").clicked() {
-                                    self.filtered_file_params.sort_by(|a, b| a.compressed_size.cmp(&b.compressed_size));
+                                    self.file_params.sort_by(|a, b| a.compressed_size.cmp(&b.compressed_size));
                                 }
                             });
                             header.col(|ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 if ui.heading("Uncompressed Size").clicked() {
-                                    self.filtered_file_params.sort_by(|a, b| a.uncompressed_size.cmp(&b.uncompressed_size));
+                                    self.file_params.sort_by(|a, b| a.uncompressed_size.cmp(&b.uncompressed_size));
                                 }
                             });
                             header.col(|ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 if ui.heading("Compressed").clicked() {
-                                    self.filtered_file_params.sort_by(|a, b| a.is_compressed.cmp(&b.is_compressed));
+                                    self.file_params.sort_by(|a, b| a.is_compressed.cmp(&b.is_compressed));
                                 }
                             });
                             header.col(|ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                                 ui.heading("Extract");
                             });
                         })
                         .body(|body| {
-                            body.rows(16.0, self.filtered_file_params.len(), |mut row| {
-                                let file_param = &self.filtered_file_params[row.index()];
+                            let filtered_file_params = &self.file_params.iter().filter(|file_param| self.file_params_filter.is_empty() || file_param.name.contains(&self.file_params_filter)).cloned().collect::<Vec<_>>();
+                            body.rows(16.0, filtered_file_params.len(), |mut row| {
+                                let file_param = &filtered_file_params[row.index()];
                                 let archive_param = &self.archive_params[file_param.archive_index as usize];
 
                                 row.col(|ui| {

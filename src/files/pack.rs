@@ -30,6 +30,8 @@ pub struct PACK {
     imports: Vec<Import>,
     assets: Vec<Asset>,
     files: Vec<File>,
+
+    files_filter: String,
 }
 
 impl PACK {
@@ -101,7 +103,9 @@ impl PACK {
 
             imports,
             assets,
-            files
+            files,
+
+            files_filter: String::new()
         })
     }
 }
@@ -336,9 +340,13 @@ impl HasUI for PACK {
             if self.files.is_empty() {
                 ui.label("No files found.");
             } else {
+                ui.horizontal(|ui| {
+                    ui.label("Filter: ");
+                    ui.text_edit_singleline(&mut self.files_filter);
+                });
                 egui::ScrollArea::vertical()
                 .show(ui, |ui| {
-                    for file in self.files.iter_mut() {
+                    for file in self.files.iter_mut().filter(|file| self.files_filter.is_empty() || file.name.contains(&self.files_filter)) {
                         egui::Frame::window(&ui.style()).show(ui, |ui| {
                             ui.collapsing(egui::RichText::new(format!("{} ({})", file.name, file.content.title())).heading(), |ui| {
                                 file.content.paint(ui, toasts);

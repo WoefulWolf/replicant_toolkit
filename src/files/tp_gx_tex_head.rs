@@ -1,6 +1,7 @@
 use std::{borrow::Cow, io::Write, path::PathBuf};
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use eframe::egui;
+use image::ImageBuffer;
 
 use crate::traits::*;
 use crate::util::ReadUtilExt;
@@ -111,19 +112,20 @@ pub struct TpGxTexHead {
     width: u32,
     height: u32,
     depth: u32,
-    unknown_0: u32,
+    mip_count: u32,
     size: u32,
     unknown_1: u32,
     format: XonSurfaceDXGIFormat,
-    mip_count: u32,
-    relative_offset_mips: u32,
-    offset_mips: u64,
+    surface_count: u32,
+    relative_offset_surfaces: u32,
+    offset_surfaces: u64,
     
-    mips: Vec<Mip>,
+    surfaces: Vec<Surface>,
 
     resource: Vec<u8>,
     dds_bytes: Vec<u8>,
-    png_bytes: Vec<u8>,
+    png_images: Vec<Vec<u8>>,
+    selected_png_index: usize,
 }
 
 impl TpGxTexHead {
@@ -131,17 +133,17 @@ impl TpGxTexHead {
         let width = reader.read_u32::<byteorder::LittleEndian>()?;
         let height = reader.read_u32::<byteorder::LittleEndian>()?;
         let depth = reader.read_u32::<byteorder::LittleEndian>()?;
-        let unknown_0 = reader.read_u32::<byteorder::LittleEndian>()?;
+        let mip_count = reader.read_u32::<byteorder::LittleEndian>()?;
         let size = reader.read_u32::<byteorder::LittleEndian>()?;
         let unknown_1 = reader.read_u32::<byteorder::LittleEndian>()?;
         let format = XonSurfaceDXGIFormat::from_u32(reader.read_u32::<byteorder::LittleEndian>()?);
-        let mip_count = reader.read_u32::<byteorder::LittleEndian>()?;
-        let (offset_mips, relative_offset_mips) = reader.read_offsets::<byteorder::LittleEndian>()?;
+        let surface_count = reader.read_u32::<byteorder::LittleEndian>()?;
+        let (offset_surfaces, relative_offset_surfaces) = reader.read_offsets::<byteorder::LittleEndian>()?;
 
-        reader.seek(std::io::SeekFrom::Start(offset_mips))?;
-        let mut mips = Vec::new();
-        for _ in 0..mip_count {
-            mips.push(Mip::new(&mut reader)?);
+        reader.seek(std::io::SeekFrom::Start(offset_surfaces))?;
+        let mut surfaces = Vec::new();
+        for _ in 0..surface_count {
+            surfaces.push(Surface::new(&mut reader)?);
         }
 
         Ok(Self {
@@ -149,17 +151,18 @@ impl TpGxTexHead {
             width,
             height,
             depth,
-            unknown_0,
+            mip_count,
             size,
             unknown_1,
             format,
-            mip_count,
-            relative_offset_mips,
-            offset_mips,
-            mips,
+            surface_count: mip_count,
+            relative_offset_surfaces,
+            offset_surfaces,
+            surfaces,
             resource: Vec::new(),
             dds_bytes: Vec::new(),
-            png_bytes: Vec::new(),
+            png_images: Vec::new(),
+            selected_png_index: 0,
         })
     }
 
@@ -169,7 +172,7 @@ impl TpGxTexHead {
         dds_bytes.write(b"DDS\x20")?;
         dds_bytes.write_u32::<byteorder::LittleEndian>(124)?;
         let mut flags = 0x1 | 0x2 | 0x4 | 0x1000 | 0x80000;
-        if self.mip_count > 1 {
+        if self.surface_count > 1 {
             flags |= 0x20000;
         }
         if self.depth > 1 {
@@ -180,7 +183,7 @@ impl TpGxTexHead {
         dds_bytes.write_u32::<byteorder::LittleEndian>(self.width)?;
         dds_bytes.write_u32::<byteorder::LittleEndian>(self.size)?;
         dds_bytes.write_u32::<byteorder::LittleEndian>(self.depth)?;
-        dds_bytes.write_u32::<byteorder::LittleEndian>(self.mip_count)?;
+        dds_bytes.write_u32::<byteorder::LittleEndian>(self.surface_count)?;
         for i in 0..11 {
             dds_bytes.write_u32::<byteorder::LittleEndian>(0)?;
         }
@@ -194,7 +197,7 @@ impl TpGxTexHead {
             dds_bytes.write_u32::<byteorder::LittleEndian>(0)?;
         }
         let mut caps = 0x1000;
-        if self.mip_count > 1 {
+        if self.surface_count > 1 {
             caps |= 0x8 | 0x400000;
         }
         dds_bytes.write_u32::<byteorder::LittleEndian>(caps)?;
@@ -225,16 +228,18 @@ impl TpGxTexHead {
     }
 
     fn populate_png_bytes(&mut self) -> Result<(), std::io::Error> {
-        let img = image_dds::image_from_dds(
-            &image_dds::ddsfile::Dds::read(std::io::Cursor::new(self.dds_bytes.clone())).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-            0
-        )
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        for mip in 0..self.mip_count {
+            let img = image_dds::image_from_dds(
+                &image_dds::ddsfile::Dds::read(std::io::Cursor::new(self.dds_bytes.clone())).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+                mip
+            )
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let mut png_bytes = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let mut png_bytes = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        self.png_bytes = png_bytes;
+            self.png_images.push(png_bytes);
+        }
         Ok(())
     }
 
@@ -261,7 +266,7 @@ impl TpGxTexHead {
     }
 
     fn export_png(&self) -> Result<(), std::io::Error> {
-        if self.png_bytes.is_empty() {
+        if self.selected_png_index >= self.png_images.len() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "PNG bytes are empty."));
         }
 
@@ -276,14 +281,14 @@ impl TpGxTexHead {
         }
 
         let mut output_file = std::fs::File::create(output_path)?;
-        output_file.write_all(&self.png_bytes)?;
+        output_file.write_all(&self.png_images[self.selected_png_index])?;
         output_file.flush()?;
 
         Ok(())
     }
 }
 
-struct Mip {
+struct Surface {
     offset: u32,
     unknown_0: u32,
     unknown_1: u32,
@@ -296,7 +301,7 @@ struct Mip {
     unknown_7: u32,
 }
 
-impl Mip {
+impl Surface {
     pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R) -> Result<Self, std::io::Error> {
         let offset = reader.read_u32::<byteorder::LittleEndian>()?;
         let unknown_0 = reader.read_u32::<byteorder::LittleEndian>()?;
@@ -343,16 +348,20 @@ impl HasResource for TpGxTexHead {
                 Ok(_) => {},
                 Err(e) => {
                     println!("Failed to populate png bytes: {}", e);
-                    self.png_bytes = Vec::new();
+                    self.png_images = Vec::new();
                 }
             }
         }
     }
     
     fn resource_preview(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
-        if !self.png_bytes.is_empty() {
-            let uri = Cow::from(format!("bytes://{}.png", self.path.to_str().unwrap_or_default()));
-            ui.add(egui::Image::new(egui::ImageSource::Bytes { uri, bytes: self.png_bytes.clone().into() }).show_loading_spinner(true).maintain_aspect_ratio(true).fit_to_exact_size(egui::Vec2::new(512.0, 512.0)));
+        ui.horizontal(|ui| {
+            ui.label("Mip:");
+            ui.add(egui::Slider::new(&mut self.selected_png_index, 0..=(self.png_images.len() - 1)).show_value(true));
+        });
+        if !self.png_images.is_empty() && self.selected_png_index < self.png_images.len() {
+            let uri = Cow::from(format!("bytes://{}.{}.png", self.path.to_str().unwrap_or_default(), self.selected_png_index));
+            ui.add(egui::Image::new(egui::ImageSource::Bytes { uri, bytes: self.png_images[self.selected_png_index].clone().into() }).texture_options(egui::TextureOptions::NEAREST).show_loading_spinner(true).maintain_aspect_ratio(true).fit_to_exact_size(egui::Vec2::new(512.0, 512.0)));
             // Export buttons
             ui.horizontal(|ui| {
                 if ui.button("Export DDS").clicked() {
@@ -392,7 +401,7 @@ impl HasUI for TpGxTexHead {
                     ui.label(format!("Depth: {}", self.depth));
                     ui.label(format!("Size: {}", self.size));
                     ui.label(format!("Format: {:X}", self.format.to_u32()));
-                    ui.label(format!("Mip Count: {}", self.mip_count));
+                    ui.label(format!("Mip Count: {}", self.surface_count));
 
                     ui.label(format!("Resource: {:?}", &self.resource[0..4]));
                 });
