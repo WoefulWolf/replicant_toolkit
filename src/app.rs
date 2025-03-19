@@ -5,6 +5,7 @@ use eframe::egui;
 use crate::{files::{self, generic_file}, traits::*};
 
 pub struct ReplicantToolkit {
+    runtime: tokio::runtime::Runtime,
     toasts: egui_notify::Toasts,
     show_open_files: bool,
     open_files: Vec<Box<dyn SystemFile>>,
@@ -17,6 +18,10 @@ pub struct ReplicantToolkit {
 impl Default for ReplicantToolkit {
     fn default() -> Self {
         Self {
+            runtime: tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
             toasts: egui_notify::Toasts::default(),
             show_open_files: true,
             open_files: Vec::new(),
@@ -40,7 +45,7 @@ impl ReplicantToolkit {
 
         match &file_magic {
             [0x28, 0xB5, 0x2F, 0xFD] => {
-                let zstd_file = match files::zstd::ZstdFile::new(path.clone(), file_stream) {
+                let zstd_file = match files::zstd::ZstdFile::new(path.clone(), file_stream, self.runtime.handle().clone()) {
                     Ok(zstd_file) => zstd_file,
                     Err(e) => {
                         self.toasts.error(format!("Failed to open file: {}", e)).duration(Some(std::time::Duration::from_secs(10))).closable(true);
@@ -50,7 +55,7 @@ impl ReplicantToolkit {
                 self.open_files.push(Box::new(zstd_file));
             },
             b"PACK" => {
-                let pack_file = match files::pack::PACK::new(path.clone(), file_stream) {
+                let pack_file = match files::pack::PACK::new(path.clone(), file_stream, self.runtime.handle().clone()) {
                     Ok(pack_file) => pack_file,
                     Err(e) => {
                         self.toasts.error(format!("Failed to open file: {}", e)).duration(Some(std::time::Duration::from_secs(10))).closable(true);
@@ -265,6 +270,8 @@ impl eframe::App for ReplicantToolkit {
                                 self.open_files[*index].paint(ui, &mut self.toasts);
                             });
                         });
+
+                        self.open_files[*index].paint_floating(ui, &mut self.toasts);
                     }
                 } else if !self.open_files.is_empty() {
                     ui.centered_and_justified(|ui| {

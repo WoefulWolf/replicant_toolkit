@@ -35,7 +35,7 @@ pub struct PACK {
 }
 
 impl PACK {
-    pub fn new<R: std::io::Read + std::io::Seek>(path: PathBuf, mut reader: R) -> Result<Self, std::io::Error> {
+    pub fn new<R: std::io::Read + std::io::Seek>(path: PathBuf, mut reader: R, runtime: tokio::runtime::Handle) -> Result<Self, std::io::Error> {
         let mut id: [u8; 4] = [0; 4];
         reader.read(&mut id)?;
         let version = reader.read_u32::<byteorder::LittleEndian>()?;
@@ -62,13 +62,13 @@ impl PACK {
         reader.seek(std::io::SeekFrom::Start(offset_assets))?;
         let mut assets = Vec::new();
         for _ in 0..asset_count {
-            assets.push(Asset::new(&mut reader)?);
+            assets.push(Asset::new(&mut reader, runtime.clone())?);
         }
 
         reader.seek(std::io::SeekFrom::Start(offset_files))?;
         let mut files = Vec::new();
         for _ in 0..file_count {
-            files.push(File::new(&mut reader)?);
+            files.push(File::new(&mut reader, runtime.clone())?);
         }
 
         reader.seek(std::io::SeekFrom::Start(serialized_size as u64))?;
@@ -154,7 +154,7 @@ struct Asset {
 }
 
 impl Asset {
-    pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R) -> Result<Self, std::io::Error> {
+    pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R, runtime: tokio::runtime::Handle) -> Result<Self, std::io::Error> {
         let hash = reader.read_u32::<byteorder::LittleEndian>()?;
         let (offset_name, relative_offset_name) = reader.read_offsets::<byteorder::LittleEndian>()?;
         let size = reader.read_u32::<byteorder::LittleEndian>()?;
@@ -173,7 +173,7 @@ impl Asset {
         reader.seek(std::io::SeekFrom::Start(offset_data_start))?;
         let content: Box<dyn ReplicantFile> = match &content_magic {
             b"BXON" => {
-                Box::new(BXON::new(name.clone().into(), &mut reader)?)
+                Box::new(BXON::new(name.clone().into(), &mut reader, runtime)?)
             },
             _ => {
                 Box::new(UnknownReplicantFile {})
@@ -210,7 +210,7 @@ struct File {
 }
 
 impl File {
-    pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R) -> Result<Self, std::io::Error> {
+    pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R, runtime: tokio::runtime::Handle) -> Result<Self, std::io::Error> {
         let hash = reader.read_u32::<byteorder::LittleEndian>()?;
         let (offset_name, relative_offset_name) = reader.read_offsets::<byteorder::LittleEndian>()?;
         let size = reader.read_u32::<byteorder::LittleEndian>()?;
@@ -229,7 +229,7 @@ impl File {
         reader.seek(std::io::SeekFrom::Start(offset_data_start))?;
         let content: Box<dyn ReplicantResourceFile> = match &content_magic {
             b"BXON" => {
-                Box::new(BXON::new(name.clone().into(), &mut reader)?)
+                Box::new(BXON::new(name.clone().into(), &mut reader, runtime)?)
             },
             _ => {
                 Box::new(UnknownReplicantFile {})

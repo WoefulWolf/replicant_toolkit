@@ -23,7 +23,7 @@ pub struct BXON {
 }
 
 impl BXON {
-    pub fn new<R: Read + Seek>(path: PathBuf, mut reader: R) -> Result<Self, std::io::Error> {
+    pub fn new<R: Read + Seek>(path: PathBuf, mut reader: R, runtime: tokio::runtime::Handle) -> Result<Self, std::io::Error> {
         let mut id: [u8; 4] = [0; 4];
         reader.read(&mut id)?;
         let version = reader.read_u32::<byteorder::LittleEndian>()?;
@@ -39,7 +39,7 @@ impl BXON {
         reader.seek(std::io::SeekFrom::Start(offset_asset_data))?;
         let asset: Box<dyn IsBXONAsset> = match asset_type.as_str() {
             "tpArchiveFileParam" => {
-                let asset = TpArchiveFileParam::new(path, reader)?;
+                let asset = TpArchiveFileParam::new(path, reader, runtime)?;
                 Box::new(asset)
             },
             "tpGxTexHead" => {
@@ -81,6 +81,10 @@ impl HasUI for BXON {
 
     fn title(&self) -> String {
         format!("{} BXON", egui_phosphor::regular::CUBE)
+    }
+
+    fn paint_floating(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
+        self.asset.paint_floating(ui, toasts);
     }
 }
 

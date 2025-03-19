@@ -7,10 +7,16 @@ pub trait HasUI {
     fn title(&self) -> String {
         "Unknown".to_string()
     }
+
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
 
     }
+
     fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
+
+    }
+
+    fn paint_floating(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
 
     }
 }

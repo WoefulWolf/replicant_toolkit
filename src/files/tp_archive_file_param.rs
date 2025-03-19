@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use byteorder::ReadBytesExt;
 use eframe::egui;
 
@@ -9,6 +11,7 @@ use crate::util::ReadUtilExt;
 
 pub struct TpArchiveFileParam {
     path: PathBuf,
+    runtime: tokio::runtime::Handle,
 
     archive_count: u32,
     rel_offset_archives: u32,
@@ -20,10 +23,13 @@ pub struct TpArchiveFileParam {
     archive_params: Vec<ArchiveParam>,
     file_params: Vec<FileParam>,
     file_params_filter: String,
+
+    archives_cache: Arc<RwLock<HashMap<String, Archive>>>,
+    extracted_file_count: Arc<std::sync::RwLock<usize>>
 }
 
 impl TpArchiveFileParam {
-    pub fn new<R: std::io::Read + std::io::Seek>(path: PathBuf, mut reader: R) -> Result<Self, std::io::Error> {
+    pub fn new<R: std::io::Read + std::io::Seek>(path: PathBuf, mut reader: R, runtime: tokio::runtime::Handle) -> Result<Self, std::io::Error> {
         let archive_count = reader.read_u32::<byteorder::LittleEndian>()?;
         let (offset_archives, rel_offset_archives) = reader.read_offsets::<byteorder::LittleEndian>()?;
         let file_count = reader.read_u32::<byteorder::LittleEndian>()?;
@@ -43,6 +49,7 @@ impl TpArchiveFileParam {
 
         Ok(Self {
             path,
+            runtime,
 
             archive_count,
             rel_offset_archives,
@@ -53,7 +60,10 @@ impl TpArchiveFileParam {
 
             archive_params,
             file_params: file_params.clone(),
-            file_params_filter: String::new()
+            file_params_filter: String::new(),
+
+            archives_cache: Arc::new(RwLock::new(HashMap::new())),
+            extracted_file_count: Arc::new(std::sync::RwLock::new(file_params.len()))
         })
     }
 
@@ -105,47 +115,81 @@ impl TpArchiveFileParam {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Output folder not found."));
         };
 
-        let mut archives: HashMap<String, Archive> = HashMap::new();
-
-        for file_param in self.file_params.iter() {
-            let archive_param = &self.archive_params[file_param.archive_index as usize];
-            let archive_name = archive_param.name.clone();
-            let mut archives_directory = self.path.clone();
-            archives_directory.pop();
-            let archive_path = archives_directory.join(&archive_name);
-
-            if !archive_path.exists() {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("Archive \"{}\" not found.", &archive_name)));
-            }
-
-            let offset = (file_param.archive_offset as u64) << 4;
-            let total_size = (file_param.uncompressed_size + file_param.buffer_size) as usize;
-
-            let archive = archives.entry(archive_name.clone()).or_insert_with(|| {
-                let archive_file = std::fs::File::open(archive_path).unwrap();
-                let archive = Archive::new(archive_file, archive_param.is_streamed).unwrap();
-                archive
-            });
-
-            let file_name = file_param.name.clone();
-            println!("Extracting {}...", file_name);
-            let file = archive.get_file(offset, file_param.compressed_size as usize, file_param.uncompressed_size as usize, file_param.buffer_size as usize, file_param.is_compressed)?;
-
-            let mut output_path = output_folder.join(&file_name);
-            let output_dir = output_path.parent().ok_or(std::io::Error::new(std::io::ErrorKind::NotFound, "Output folder not found."))?;
-
-            if !output_dir.exists() {
-                std::fs::create_dir_all(output_dir)?;
-            }
-
-            let mut output_file = std::fs::File::create(&mut output_path)?;
-            
-            output_file.write_all(&file)?;
-            output_file.flush()?;
+        {
+            let mut extracted_file_count = self.extracted_file_count.write().unwrap();
+            *extracted_file_count = 0;
         }
 
-        println!("All files extracted successfully.");
+        let mut sorted_file_params = self.file_params.clone();
+        sorted_file_params.sort_by(|a, b| a.archive_index.cmp(&b.archive_index));
 
+        for file_param in sorted_file_params.iter().cloned() {
+            let output_folder = output_folder.clone();
+            let mut archives_directory = self.path.clone();
+            archives_directory.pop();
+            let archive_param = self.archive_params[file_param.archive_index as usize].clone();
+            let archives_cache = self.archives_cache.clone();
+            let extracted_file_count = self.extracted_file_count.clone();
+
+            self.runtime.spawn(async move {            
+                match TpArchiveFileParam::extract_file_async(archives_directory, archive_param, archives_cache, output_folder, file_param.clone()).await {
+                    Ok(_) => {println!("Extracted {}.", file_param.name);},
+                    Err(e) => {
+                        println!("Failed to extract {}: {}", file_param.name, e);
+                    }
+                }
+                let mut extracted_file_count = extracted_file_count.write().unwrap();
+                *extracted_file_count += 1;
+            });
+        }
+
+        Ok(())
+    }
+
+
+    async fn extract_file_async(archives_directory: PathBuf, archive_param: ArchiveParam, archives_cache: Arc<RwLock<HashMap<String, Archive>>>, output_folder: PathBuf, file_param: FileParam) -> Result<(), std::io::Error> {
+        let archive_name = archive_param.name.clone();
+        let archive_path = archives_directory.join(&archive_name);
+
+        if !archive_path.exists() {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("Archive \"{}\" not found.", &archive_name)));
+        }
+
+        let offset = (file_param.archive_offset as u64) << 4;
+        let total_size = (file_param.uncompressed_size + file_param.buffer_size) as usize;
+
+        {
+            let is_streamed = archive_param.is_streamed.clone();
+            let cache = archives_cache.clone();
+            let mut cache_write = cache.write().await;
+
+            if !cache_write.contains_key(&archive_name) {
+                println!("Opening {}...", archive_name);
+                let archive_file = std::fs::File::open(archive_path).unwrap();
+                let archive = Archive::new(archive_file, is_streamed).unwrap();
+                cache_write.insert(archive_name.clone(), archive);
+            } else {
+            }
+        }
+
+        let cache = archives_cache.clone();
+        let cache_read = cache.read().await;
+        let archive = cache_read.get(&archive_name).unwrap();
+
+        let file_name = file_param.name.clone();
+        let file = archive.get_file(offset, file_param.compressed_size as usize, file_param.uncompressed_size as usize, file_param.buffer_size as usize, file_param.is_compressed)?;
+
+        let mut output_path = output_folder.join(&file_name);
+        let output_dir = output_path.parent().ok_or(std::io::Error::new(std::io::ErrorKind::NotFound, "Output folder not found."))?;
+
+        if !output_dir.exists() {
+            std::fs::create_dir_all(output_dir)?;
+        }
+
+        let mut output_file = std::fs::File::create(&mut output_path)?;
+        
+        output_file.write_all(&file)?;
+        output_file.flush()?;
         Ok(())
     }
 }
@@ -207,6 +251,7 @@ impl Archive {
     }
 }
 
+#[derive(Clone)]
 struct ArchiveParam {
     rel_offset_name: u32,
     flags: u32,
@@ -443,9 +488,7 @@ impl HasUI for TpArchiveFileParam {
         ui.menu_button(format!("{} Extract", egui_phosphor::regular::FOLDER_OPEN), |ui| {
             if ui.button("All files…").clicked() {
                 match self.extract_all_files() {
-                    Ok(_) => {
-                        toasts.success(format!("All files extracted successfully.")).duration(Some(std::time::Duration::from_secs(10))).closable(true);
-                    },
+                    Ok(_) => {},
                     Err(e) => {
                         toasts.error(format!("Failed to extract all files: {}", e)).duration(Some(std::time::Duration::from_secs(10))).closable(true);
                     }
@@ -453,6 +496,20 @@ impl HasUI for TpArchiveFileParam {
                 ui.close_menu();
             }
         });
+    }
+
+    fn paint_floating(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
+        let extracted_file_count = self.extracted_file_count.read().unwrap();
+        if *extracted_file_count < self.file_params.len() {
+            egui::Window::new(format!("{} Extracted {}/{} files...", egui_phosphor::regular::TRAY_ARROW_UP, extracted_file_count, self.file_params.len()))
+            .id(egui::Id::new("archive_extract_progress"))
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.add(egui::ProgressBar::new(*extracted_file_count as f32/self.file_params.len() as f32));
+            });
+            ui.ctx().request_repaint();
+        }
     }
 }
 

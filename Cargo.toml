@@ -12,4 +12,5 @@ egui_extras = { version = "0.31.1", features = ["all_loaders"] }
 image = { version = "0.25.5" }
 image_dds = "0.7.2"
 rfd = "0.15.3"
+tokio = { version = "1.44.1", features = ["rt-multi-thread", "sync"] }
 zstd = "0.13.3"
