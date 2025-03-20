@@ -105,9 +105,7 @@ impl XonSurfaceDXGIFormat {
     }
 }
 
-pub struct TpGxTexHead {
-    path: PathBuf,
-
+struct TpGxTexHead {
     width: u32,
     height: u32,
     depth: u32,
@@ -118,17 +116,11 @@ pub struct TpGxTexHead {
     surface_count: u32,
     relative_offset_surfaces: u32,
     offset_surfaces: u64,
-    
     surfaces: Vec<Surface>,
-
-    resource: Vec<u8>,
-    dds_bytes: Vec<u8>,
-    png_images: Vec<Vec<u8>>,
-    selected_png_index: usize,
 }
 
 impl TpGxTexHead {
-    pub fn new<R: std::io::Read + std::io::Seek>(path: PathBuf, mut reader: R) -> Result<Self, std::io::Error> {
+    pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R) -> Result<Self, std::io::Error> {
         let width = reader.read_u32::<byteorder::LittleEndian>()?;
         let height = reader.read_u32::<byteorder::LittleEndian>()?;
         let depth = reader.read_u32::<byteorder::LittleEndian>()?;
@@ -146,7 +138,6 @@ impl TpGxTexHead {
         }
 
         Ok(Self {
-            path,
             width,
             height,
             depth,
@@ -158,6 +149,30 @@ impl TpGxTexHead {
             relative_offset_surfaces,
             offset_surfaces,
             surfaces,
+        })
+    }
+}
+
+pub struct TpGxTexHeadManager {
+    path: PathBuf,
+    runtime: tokio::runtime::Handle,
+
+    tp_gx_tex_head: TpGxTexHead,
+    resource: Vec<u8>,
+    dds_bytes: Vec<u8>,
+    png_images: Vec<Vec<u8>>,
+    selected_png_index: usize,
+}
+
+impl TpGxTexHeadManager {
+    pub fn new<R: std::io::Read + std::io::Seek>(path: PathBuf, runtime: tokio::runtime::Handle, reader: R) -> Result<Self, std::io::Error> {
+        let tp_gx_tex_head = TpGxTexHead::new(reader)?;
+
+        Ok(Self {
+            path,
+            runtime,
+
+            tp_gx_tex_head,
             resource: Vec::new(),
             dds_bytes: Vec::new(),
             png_images: Vec::new(),
@@ -171,18 +186,18 @@ impl TpGxTexHead {
         dds_bytes.write(b"DDS\x20")?;
         dds_bytes.write_u32::<byteorder::LittleEndian>(124)?;
         let mut flags = 0x1 | 0x2 | 0x4 | 0x1000 | 0x80000;
-        if self.surface_count > 1 {
+        if self.tp_gx_tex_head.surface_count > 1 {
             flags |= 0x20000;
         }
-        if self.depth > 1 {
+        if self.tp_gx_tex_head.depth > 1 {
             flags |= 0x800000;
         }
         dds_bytes.write_u32::<byteorder::LittleEndian>(flags)?;
-        dds_bytes.write_u32::<byteorder::LittleEndian>(self.height)?;
-        dds_bytes.write_u32::<byteorder::LittleEndian>(self.width)?;
-        dds_bytes.write_u32::<byteorder::LittleEndian>(self.size)?;
-        dds_bytes.write_u32::<byteorder::LittleEndian>(self.depth)?;
-        dds_bytes.write_u32::<byteorder::LittleEndian>(self.surface_count)?;
+        dds_bytes.write_u32::<byteorder::LittleEndian>(self.tp_gx_tex_head.height)?;
+        dds_bytes.write_u32::<byteorder::LittleEndian>(self.tp_gx_tex_head.width)?;
+        dds_bytes.write_u32::<byteorder::LittleEndian>(self.tp_gx_tex_head.size)?;
+        dds_bytes.write_u32::<byteorder::LittleEndian>(self.tp_gx_tex_head.depth)?;
+        dds_bytes.write_u32::<byteorder::LittleEndian>(self.tp_gx_tex_head.surface_count)?;
         for i in 0..11 {
             dds_bytes.write_u32::<byteorder::LittleEndian>(0)?;
         }
@@ -196,12 +211,12 @@ impl TpGxTexHead {
             dds_bytes.write_u32::<byteorder::LittleEndian>(0)?;
         }
         let mut caps = 0x1000;
-        if self.surface_count > 1 {
+        if self.tp_gx_tex_head.surface_count > 1 {
             caps |= 0x8 | 0x400000;
         }
         dds_bytes.write_u32::<byteorder::LittleEndian>(caps)?;
         caps = 0x0;
-        if self.depth > 1 {
+        if self.tp_gx_tex_head.depth > 1 {
             caps |= 0x200000;
         }
         dds_bytes.write_u32::<byteorder::LittleEndian>(caps)?;
@@ -211,15 +226,15 @@ impl TpGxTexHead {
         dds_bytes.write_u32::<byteorder::LittleEndian>(0)?;
 
         // DDS Header DXT10
-        dds_bytes.write_u32::<byteorder::LittleEndian>(self.format.to_dxgi_format())?;
+        dds_bytes.write_u32::<byteorder::LittleEndian>(self.tp_gx_tex_head.format.to_dxgi_format())?;
         let mut dimension = 3;
-        if self.depth > 1 {
+        if self.tp_gx_tex_head.depth > 1 {
             dimension = 4;
         }
         dds_bytes.write_u32::<byteorder::LittleEndian>(dimension)?;
         dds_bytes.write_u32::<byteorder::LittleEndian>(0)?;
         dds_bytes.write_u32::<byteorder::LittleEndian>(1)?;
-        dds_bytes.write_u32::<byteorder::LittleEndian>(self.format.get_alpha_mode())?;
+        dds_bytes.write_u32::<byteorder::LittleEndian>(self.tp_gx_tex_head.format.get_alpha_mode())?;
         dds_bytes.write(&self.resource)?;
 
         self.dds_bytes = dds_bytes;
@@ -227,7 +242,7 @@ impl TpGxTexHead {
     }
 
     fn populate_png_bytes(&mut self) -> Result<(), std::io::Error> {
-        for mip in 0..self.mip_count {
+        for mip in 0..self.tp_gx_tex_head.mip_count {
             let img = image_dds::image_from_dds(
                 &image_dds::ddsfile::Dds::read(std::io::Cursor::new(self.dds_bytes.clone())).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
                 mip
@@ -287,50 +302,35 @@ impl TpGxTexHead {
     }
 }
 
-struct Surface {
-    offset: u32,
-    unknown_0: u32,
-    unknown_1: u32,
-    unknown_2: u32,
-    size: u32,
-    unknown_3: u32,
-    width: u32,
-    height: u32,
-    unknown_6: u32,
-    unknown_7: u32,
-}
+impl Manager for TpGxTexHeadManager {
+    fn path(&self) -> &PathBuf {
+        &self.path
+    }
 
-impl Surface {
-    pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R) -> Result<Self, std::io::Error> {
-        let offset = reader.read_u32::<byteorder::LittleEndian>()?;
-        let unknown_0 = reader.read_u32::<byteorder::LittleEndian>()?;
-        let unknown_1 = reader.read_u32::<byteorder::LittleEndian>()?;
-        let unknown_2 = reader.read_u32::<byteorder::LittleEndian>()?;
-        let size = reader.read_u32::<byteorder::LittleEndian>()?;
-        let unknown_3 = reader.read_u32::<byteorder::LittleEndian>()?;
-        let width = reader.read_u32::<byteorder::LittleEndian>()?;
-        let height = reader.read_u32::<byteorder::LittleEndian>()?;
-        let unknown_6 = reader.read_u32::<byteorder::LittleEndian>()?;
-        let unknown_7 = reader.read_u32::<byteorder::LittleEndian>()?;
+    fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
+        egui::Frame::window(&ui.style()).show(ui, |ui| {
+            egui::CollapsingHeader::new(egui::RichText::new(self.title()).heading())
+                .default_open(false)
+                .show(ui, |ui| {
+                    ui.label(format!("Width: {}", self.tp_gx_tex_head.width));
+                    ui.label(format!("Height: {}", self.tp_gx_tex_head.height));
+                    ui.label(format!("Depth: {}", self.tp_gx_tex_head.depth));
+                    ui.label(format!("Size: {}", self.tp_gx_tex_head.size));
+                    ui.label(format!("Format: {:X}", self.tp_gx_tex_head.format.to_u32()));
+                    ui.label(format!("Mip Count: {}", self.tp_gx_tex_head.mip_count));
+                    ui.label(format!("Surface Count: {}", self.tp_gx_tex_head.surface_count));
+                });
+            });
+    }
 
-        Ok(Self {
-            offset,
-            unknown_0,
-            unknown_1,
-            unknown_2,
-            size,
-            unknown_3,
-            width,
-            height,
-            unknown_6,
-            unknown_7
-        })
+    fn title(&self) -> String {
+        format!("{} tpGxTexHead", egui_phosphor::regular::IMAGE)
     }
 }
 
-impl HasResource for TpGxTexHead {
+impl Resource for TpGxTexHeadManager {
     fn get_resource_size(&self) -> u32 {
-        self.size
+        self.tp_gx_tex_head.size
     }
 
     fn set_resource(&mut self, resource: Vec<u8>) {
@@ -389,26 +389,45 @@ impl HasResource for TpGxTexHead {
     }
 }
 
-impl HasUI for TpGxTexHead {
-    fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
-        egui::Frame::window(&ui.style()).show(ui, |ui| {
-            egui::CollapsingHeader::new(egui::RichText::new(self.title()).heading())
-                .default_open(false)
-                .show(ui, |ui| {
-                    ui.label(format!("Width: {}", self.width));
-                    ui.label(format!("Height: {}", self.height));
-                    ui.label(format!("Depth: {}", self.depth));
-                    ui.label(format!("Size: {}", self.size));
-                    ui.label(format!("Format: {:X}", self.format.to_u32()));
-                    ui.label(format!("Mip Count: {}", self.mip_count));
-                    ui.label(format!("Surface Count: {}", self.surface_count));
-                });
-            });
-    }
+impl ResourceManager for TpGxTexHeadManager {}
 
-    fn title(&self) -> String {
-        format!("{} tpGxTexHead", egui_phosphor::regular::IMAGE)
-    }
+struct Surface {
+    offset: u32,
+    unknown_0: u32,
+    unknown_1: u32,
+    unknown_2: u32,
+    size: u32,
+    unknown_3: u32,
+    width: u32,
+    height: u32,
+    unknown_6: u32,
+    unknown_7: u32,
 }
 
-impl IsBXONAsset for TpGxTexHead {}
+impl Surface {
+    pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R) -> Result<Self, std::io::Error> {
+        let offset = reader.read_u32::<byteorder::LittleEndian>()?;
+        let unknown_0 = reader.read_u32::<byteorder::LittleEndian>()?;
+        let unknown_1 = reader.read_u32::<byteorder::LittleEndian>()?;
+        let unknown_2 = reader.read_u32::<byteorder::LittleEndian>()?;
+        let size = reader.read_u32::<byteorder::LittleEndian>()?;
+        let unknown_3 = reader.read_u32::<byteorder::LittleEndian>()?;
+        let width = reader.read_u32::<byteorder::LittleEndian>()?;
+        let height = reader.read_u32::<byteorder::LittleEndian>()?;
+        let unknown_6 = reader.read_u32::<byteorder::LittleEndian>()?;
+        let unknown_7 = reader.read_u32::<byteorder::LittleEndian>()?;
+
+        Ok(Self {
+            offset,
+            unknown_0,
+            unknown_1,
+            unknown_2,
+            size,
+            unknown_3,
+            width,
+            height,
+            unknown_6,
+            unknown_7
+        })
+    }
+}

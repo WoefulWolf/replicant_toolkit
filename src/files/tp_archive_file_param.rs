@@ -6,44 +6,63 @@ use tokio::sync::RwLock;
 use byteorder::ReadBytesExt;
 use eframe::egui;
 
-use crate::traits::{HasResource, HasUI, IsBXONAsset};
+use crate::traits::*;
 use crate::util::ReadUtilExt;
 
-pub struct TpArchiveFileParam {
-    path: PathBuf,
-    runtime: tokio::runtime::Handle,
-
+struct TpArchiveFileParam {
     archive_count: u32,
     rel_offset_archives: u32,
     offset_archives: u64,
     file_count: u32,
     rel_offset_files: u32,
     offset_files: u64,
-
-    archive_params: Vec<ArchiveParam>,
-    file_params: Vec<FileParam>,
-    file_params_filter: String,
-
-    archives_cache: Arc<RwLock<HashMap<String, Archive>>>,
-    extracted_file_count: Arc<std::sync::RwLock<usize>>
 }
 
 impl TpArchiveFileParam {
-    pub fn new<R: std::io::Read + std::io::Seek>(path: PathBuf, mut reader: R, runtime: tokio::runtime::Handle) -> Result<Self, std::io::Error> {
+    pub fn new<R: std::io::Read + std::io::Seek>(mut reader: R) -> Result<Self, std::io::Error> {
         let archive_count = reader.read_u32::<byteorder::LittleEndian>()?;
         let (offset_archives, rel_offset_archives) = reader.read_offsets::<byteorder::LittleEndian>()?;
         let file_count = reader.read_u32::<byteorder::LittleEndian>()?;
         let (offset_files, rel_offset_files) = reader.read_offsets::<byteorder::LittleEndian>()?;
 
-        reader.seek(std::io::SeekFrom::Start(offset_archives))?;
+        Ok(Self {
+            archive_count,
+            rel_offset_archives,
+            offset_archives,
+            file_count,
+            rel_offset_files,
+            offset_files,
+        })
+    }
+}
+
+pub struct TpArchiveFileParamManager {
+    path: PathBuf,
+    runtime: tokio::runtime::Handle,
+
+    tp_archive_file_param: TpArchiveFileParam,
+    archive_params: Vec<ArchiveParam>,
+    file_params: Vec<FileParam>,
+    file_params_filter: String,
+
+    archives_cache: Arc<RwLock<HashMap<String, Archive>>>,
+    extracted_file_count: Arc<std::sync::RwLock<usize>>,
+    failed_extraction_count: Arc<std::sync::RwLock<usize>>
+}
+
+impl TpArchiveFileParamManager {
+    pub fn new<R: std::io::Read + std::io::Seek>(path: PathBuf, runtime: tokio::runtime::Handle, mut reader: R) -> Result<Self, std::io::Error> {
+        let tp_archive_file_param = TpArchiveFileParam::new(&mut reader)?;
+
+        reader.seek(std::io::SeekFrom::Start(tp_archive_file_param.offset_archives))?;
         let mut archive_params = Vec::new();
-        for _ in 0..archive_count {
+        for _ in 0..tp_archive_file_param.archive_count {
             archive_params.push(ArchiveParam::new(&mut reader)?);
         }
 
-        reader.seek(std::io::SeekFrom::Start(offset_files))?;
+        reader.seek(std::io::SeekFrom::Start(tp_archive_file_param.offset_files))?;
         let mut file_params = Vec::new();
-        for _ in 0..file_count {
+        for _ in 0..tp_archive_file_param.file_count {
             file_params.push(FileParam::new(&mut reader)?);
         }
 
@@ -51,19 +70,14 @@ impl TpArchiveFileParam {
             path,
             runtime,
 
-            archive_count,
-            rel_offset_archives,
-            offset_archives,
-            file_count,
-            rel_offset_files,
-            offset_files,
-
+            tp_archive_file_param,
             archive_params,
             file_params: file_params.clone(),
             file_params_filter: String::new(),
 
             archives_cache: Arc::new(RwLock::new(HashMap::new())),
-            extracted_file_count: Arc::new(std::sync::RwLock::new(file_params.len()))
+            extracted_file_count: Arc::new(std::sync::RwLock::new(file_params.len())),
+            failed_extraction_count: Arc::new(std::sync::RwLock::new(0))
         })
     }
 
@@ -118,6 +132,8 @@ impl TpArchiveFileParam {
         {
             let mut extracted_file_count = self.extracted_file_count.write().unwrap();
             *extracted_file_count = 0;
+            let mut failed_extraction_count = self.failed_extraction_count.write().unwrap();
+            *failed_extraction_count = 0;
         }
 
         let mut sorted_file_params = self.file_params.clone();
@@ -130,16 +146,21 @@ impl TpArchiveFileParam {
             let archive_param = self.archive_params[file_param.archive_index as usize].clone();
             let archives_cache = self.archives_cache.clone();
             let extracted_file_count = self.extracted_file_count.clone();
+            let failed_extraction_count = self.failed_extraction_count.clone();
 
             self.runtime.spawn(async move {            
-                match TpArchiveFileParam::extract_file_async(archives_directory, archive_param, archives_cache, output_folder, file_param.clone()).await {
-                    Ok(_) => {println!("Extracted {}.", file_param.name);},
+                match TpArchiveFileParamManager::extract_file_async(archives_directory, archive_param, archives_cache, output_folder, file_param.clone()).await {
+                    Ok(_) => {
+                        println!("Extracted {}.", file_param.name);
+                        let mut extracted_file_count = extracted_file_count.write().unwrap();
+                        *extracted_file_count += 1;
+                    },
                     Err(e) => {
                         println!("Failed to extract {}: {}", file_param.name, e);
+                        let mut failed_extraction_count = failed_extraction_count.write().unwrap();
+                        *failed_extraction_count += 1;
                     }
                 }
-                let mut extracted_file_count = extracted_file_count.write().unwrap();
-                *extracted_file_count += 1;
             });
         }
 
@@ -193,6 +214,9 @@ impl TpArchiveFileParam {
         Ok(())
     }
 }
+
+impl Resource for TpArchiveFileParamManager {}
+impl ResourceManager for TpArchiveFileParamManager {}
 
 struct Archive {
     data: Vec<u8>,
@@ -338,14 +362,18 @@ impl FileParam {
     }
 }
 
-impl HasUI for TpArchiveFileParam {
+impl Manager for TpArchiveFileParamManager {
+    fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         egui::Frame::window(&ui.style()).show(ui, |ui| {
             egui::CollapsingHeader::new(egui::RichText::new(format!("{} tpArchiveFileParam", egui_phosphor::regular::DATABASE)).heading())
                 .default_open(true)
                 .show(ui, |ui| {
-                    ui.label(format!("Archive Count: {}", self.archive_count));
-                    ui.label(format!("File Count: {}", self.file_count));
+                    ui.label(format!("Archive Count: {}", self.tp_archive_file_param.archive_count));
+                    ui.label(format!("File Count: {}", self.tp_archive_file_param.file_count));
 
                     ui.separator();
 
@@ -500,6 +528,7 @@ impl HasUI for TpArchiveFileParam {
 
     fn paint_floating(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         let extracted_file_count = self.extracted_file_count.read().unwrap();
+        let failed_extraction_count = self.failed_extraction_count.read().unwrap();
         if *extracted_file_count < self.file_params.len() {
             egui::Window::new(format!("{} Extracted {}/{} files...", egui_phosphor::regular::TRAY_ARROW_UP, extracted_file_count, self.file_params.len()))
             .id(egui::Id::new("archive_extract_progress"))
@@ -507,12 +536,13 @@ impl HasUI for TpArchiveFileParam {
             .resizable(false)
             .show(ui.ctx(), |ui| {
                 ui.add(egui::ProgressBar::new(*extracted_file_count as f32/self.file_params.len() as f32));
+                if *failed_extraction_count > 0 {
+                    ui.vertical_centered(|ui| {
+                        ui.label(format!("Failed to extract {} files.", failed_extraction_count));
+                    });
+                }
             });
             ui.ctx().request_repaint();
         }
     }
 }
-
-impl HasResource for TpArchiveFileParam {}
-
-impl IsBXONAsset for TpArchiveFileParam {}

@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
-pub trait HasSystemPath {
+
+
+pub trait Manager {
     fn path(&self) -> &PathBuf;
-}
-pub trait HasUI {
+
     fn title(&self) -> String {
         "Unknown".to_string()
     }
@@ -21,13 +22,7 @@ pub trait HasUI {
     }
 }
 
-pub trait SystemFile: HasSystemPath + HasUI {}
-
-pub trait ReplicantFile: HasUI {}
-pub trait ReplicantResourceFile: HasUI + HasResource {}
-
-
-pub trait HasResource {
+pub trait Resource {
     fn get_resource_size(&self) -> u32 {
         0
     }
@@ -41,4 +36,4 @@ pub trait HasResource {
     }
 }
 
-pub trait IsBXONAsset: HasUI + HasResource {}
+pub trait ResourceManager: Resource + Manager {}

@@ -8,7 +8,7 @@ pub struct ReplicantToolkit {
     runtime: tokio::runtime::Runtime,
     toasts: egui_notify::Toasts,
     show_open_files: bool,
-    open_files: Vec<Box<dyn SystemFile>>,
+    open_files: Vec<Box<dyn Manager>>,
     selected_file_indices: Vec<usize>,
     files_to_close: Vec<usize>,
 
@@ -45,7 +45,7 @@ impl ReplicantToolkit {
 
         match &file_magic {
             [0x28, 0xB5, 0x2F, 0xFD] => {
-                let zstd_file = match files::zstd::ZstdFile::new(path.clone(), file_stream, self.runtime.handle().clone()) {
+                let zstd_file = match files::zstd::ZstdManager::new(path.clone(), self.runtime.handle().clone(), file_stream) {
                     Ok(zstd_file) => zstd_file,
                     Err(e) => {
                         self.toasts.error(format!("Failed to open file: {}", e)).duration(Some(std::time::Duration::from_secs(10))).closable(true);
@@ -55,7 +55,7 @@ impl ReplicantToolkit {
                 self.open_files.push(Box::new(zstd_file));
             },
             b"PACK" => {
-                let pack_file = match files::pack::PACK::new(path.clone(), file_stream, self.runtime.handle().clone()) {
+                let pack_file = match files::pack::PackManager::new(path.clone(), self.runtime.handle().clone(), file_stream) {
                     Ok(pack_file) => pack_file,
                     Err(e) => {
                         self.toasts.error(format!("Failed to open file: {}", e)).duration(Some(std::time::Duration::from_secs(10))).closable(true);
@@ -65,7 +65,7 @@ impl ReplicantToolkit {
                 self.open_files.push(Box::new(pack_file));
             },
             _ => {
-                let generic_file = Box::new(generic_file::GenericFile::new(path.clone()));
+                let generic_file = Box::new(generic_file::GenericFileManager::new(path.clone()));
                 self.open_files.push(generic_file);
             }
         };
@@ -270,13 +270,15 @@ impl eframe::App for ReplicantToolkit {
                                 self.open_files[*index].paint(ui, &mut self.toasts);
                             });
                         });
-
-                        self.open_files[*index].paint_floating(ui, &mut self.toasts);
                     }
                 } else if !self.open_files.is_empty() {
                     ui.centered_and_justified(|ui| {
                         ui.label("Select a file to start!");
                     });
+                }
+
+                for file in self.open_files.iter_mut() {
+                    file.paint_floating(ui, &mut self.toasts);
                 }
             });
     }

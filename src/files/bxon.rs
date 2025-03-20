@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use byteorder::ReadBytesExt;
 use eframe::egui;
 
-use crate::files::tp_archive_file_param::TpArchiveFileParam;
-use crate::traits::{HasResource, HasUI, IsBXONAsset, ReplicantFile, ReplicantResourceFile};
+use crate::files::tp_archive_file_param::TpArchiveFileParamManager;
+use crate::traits::*;
 use crate::util::ReadUtilExt;
 
-use super::tp_gx_tex_head::TpGxTexHead;
+use super::tp_gx_tex_head::TpGxTexHeadManager;
 
-pub struct BXON {
+struct Bxon {
     id: [u8; 4],
     version: u32,
     project_id: u32,
@@ -18,12 +18,10 @@ pub struct BXON {
     relative_offset_asset_data: u32,
     offset_asset_data: u64,
     asset_type: String,
-
-    asset: Box<dyn IsBXONAsset>
 }
 
-impl BXON {
-    pub fn new<R: Read + Seek>(path: PathBuf, mut reader: R, runtime: tokio::runtime::Handle) -> Result<Self, std::io::Error> {
+impl Bxon {
+    pub fn new<R: Read + Seek>(mut reader: R) -> Result<Self, std::io::Error> {
         let mut id: [u8; 4] = [0; 4];
         reader.read(&mut id)?;
         let version = reader.read_u32::<byteorder::LittleEndian>()?;
@@ -36,22 +34,6 @@ impl BXON {
         reader.seek(std::io::SeekFrom::Start(offset_asset_type))?;
         let asset_type = reader.read_string()?;
 
-        reader.seek(std::io::SeekFrom::Start(offset_asset_data))?;
-        let asset: Box<dyn IsBXONAsset> = match asset_type.as_str() {
-            "tpArchiveFileParam" => {
-                let asset = TpArchiveFileParam::new(path, reader, runtime)?;
-                Box::new(asset)
-            },
-            "tpGxTexHead" => {
-                let asset = TpGxTexHead::new(path, reader)?;
-                Box::new(asset)
-            },
-            _ => {
-                let asset = UnknownBXONAsset { path, asset_type: asset_type.clone() };
-                Box::new(asset)
-            }
-        };
-
         Ok(Self {
             id,
             version,
@@ -61,22 +43,63 @@ impl BXON {
             relative_offset_asset_data,
             offset_asset_data,
             asset_type,
-            asset
         })
     }
 }
 
-impl HasUI for BXON {
+pub struct BxonManager {
+    path: PathBuf,
+    runtime: tokio::runtime::Handle,
+
+    bxon: Bxon,
+    contents: Box<dyn ResourceManager>
+}
+
+impl BxonManager {
+    pub fn new<R: Read + Seek>(path: PathBuf, runtime: tokio::runtime::Handle, mut reader: R) -> Result<Self, std::io::Error> {
+        let bxon = Bxon::new(&mut reader)?;
+
+        reader.seek(std::io::SeekFrom::Start(bxon.offset_asset_data))?;
+        let contents: Box<dyn ResourceManager> = match bxon.asset_type.as_str() {
+            "tpArchiveFileParam" => {
+                let asset = TpArchiveFileParamManager::new(path.clone(), runtime.clone(), reader)?;
+                Box::new(asset)
+            },
+            "tpGxTexHead" => {
+                let asset = TpGxTexHeadManager::new(path.clone(), runtime.clone(), reader)?;
+                Box::new(asset)
+            },
+            _ => {
+                let asset = UnknownBxonAssetManager::new(path.clone(), runtime.clone(), bxon.asset_type.clone())?;
+                Box::new(asset)
+            }
+        };
+
+        Ok(Self {
+            path,
+            runtime,
+
+            bxon,
+            contents
+        })
+    }
+}
+
+impl Manager for BxonManager {
+    fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
-        ui.label(format!("Version: {}", self.version));
-        ui.label(format!("Project Id: {}", self.project_id));
+        ui.label(format!("Version: {}", self.bxon.version));
+        ui.label(format!("Project Id: {}", self.bxon.project_id));
         ui.separator();
-        self.asset.paint(ui, toasts);
-        self.asset.resource_preview(ui, toasts);
+        self.contents.paint(ui, toasts);
+        self.contents.resource_preview(ui, toasts);
     }
 
     fn paint_top_bar(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
-        self.asset.paint_top_bar(ui, toasts);
+        self.contents.paint_top_bar(ui, toasts);
     }
 
     fn title(&self) -> String {
@@ -84,29 +107,45 @@ impl HasUI for BXON {
     }
 
     fn paint_floating(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
-        self.asset.paint_floating(ui, toasts);
+        self.contents.paint_floating(ui, toasts);
     }
 }
 
-impl HasResource for BXON {
+impl Resource for BxonManager {
     fn get_resource_size(&self) -> u32 {
-        self.asset.get_resource_size()
+        self.contents.get_resource_size()
     }
 
     fn set_resource(&mut self, resource: Vec<u8>) {
-        self.asset.set_resource(resource);
+        self.contents.set_resource(resource);
     }
 }
 
-impl ReplicantFile for BXON {}
-impl ReplicantResourceFile for BXON {}
+impl ResourceManager for BxonManager {}
 
-struct UnknownBXONAsset {
+struct UnknownBxonAssetManager {
     path: PathBuf,
+    runtime: tokio::runtime::Handle,
+
     asset_type: String,
 }
 
-impl HasUI for UnknownBXONAsset {
+impl UnknownBxonAssetManager {
+    pub fn new(path: PathBuf, runtime: tokio::runtime::Handle, asset_type: String) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            path,
+            runtime,
+
+            asset_type
+        })
+    }
+}
+
+impl Manager for UnknownBxonAssetManager {
+    fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         egui::Frame::window(&ui.style()).show(ui, |ui| {
             ui.label(format!("Unknown BXON asset type: {}", self.asset_type));
@@ -114,6 +153,6 @@ impl HasUI for UnknownBXONAsset {
     }
 }
 
-impl HasResource for UnknownBXONAsset {}
+impl Resource for UnknownBxonAssetManager {}
 
-impl IsBXONAsset for UnknownBXONAsset {}
+impl ResourceManager for UnknownBxonAssetManager {}

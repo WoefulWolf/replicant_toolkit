@@ -1,4 +1,6 @@
-use crate::traits::{HasResource, HasUI, ReplicantFile, ReplicantResourceFile};
+use std::path::PathBuf;
+
+use crate::traits::*;
 
 pub mod generic_file;
 pub mod bxon;
@@ -7,10 +9,30 @@ pub mod zstd;
 pub mod pack;
 pub mod tp_gx_tex_head;
 
-struct UnknownReplicantFile {
+struct UnknownFile {}
+
+pub struct UnknownFileManager {
+    path: PathBuf,
+    runtime: tokio::runtime::Handle,
+
+    unknown_file: UnknownFile
 }
 
-impl HasUI for UnknownReplicantFile {
+impl UnknownFileManager {
+    pub fn new(path: PathBuf, runtime: tokio::runtime::Handle) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            path,
+            runtime,
+            unknown_file: UnknownFile {}
+        })
+    }
+}
+
+impl Manager for UnknownFileManager {
+    fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         ui.label("Unknown Replicant file");
     }
@@ -20,7 +42,6 @@ impl HasUI for UnknownReplicantFile {
     }
 }
 
-impl HasResource for UnknownReplicantFile {}
+impl Resource for UnknownFileManager {}
 
-impl ReplicantResourceFile for UnknownReplicantFile {}
-impl ReplicantFile for UnknownReplicantFile {}
+impl ResourceManager for UnknownFileManager {}

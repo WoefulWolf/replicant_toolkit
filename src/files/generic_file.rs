@@ -4,23 +4,21 @@ use eframe::egui;
 
 use crate::traits::*;
 
-pub struct GenericFile {
+pub struct GenericFileManager {
     pub path: PathBuf,
 }
 
-impl GenericFile {
+impl GenericFileManager {
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
 }
 
-impl HasSystemPath for GenericFile {
+impl Manager for GenericFileManager {
     fn path(&self) -> &PathBuf {
         &self.path
     }
-}
 
-impl HasUI for GenericFile {
     fn paint(&mut self, ui: &mut eframe::egui::Ui, toasts: &mut egui_notify::Toasts) {
         ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::TopDown), |ui| {
             ui.style_mut().interaction.selectable_labels = false;
@@ -32,6 +30,3 @@ impl HasUI for GenericFile {
         format!("{} Unknown", egui_phosphor::regular::FILE)
     }
 }
-    
-
-impl SystemFile for GenericFile {}
